@@ -187,7 +187,6 @@ async function loadCards(){
 }
 
 async function deleteCard(id, username){
-  if (!confirm(`Delete ${username}'s card? They'll get a brand new random card next time they visit their link.`)) return;
   const { error } = await sb.from("cards").delete().eq("id", id);
   if (error) { toast("Delete failed: " + error.message); return; }
   cards = cards.filter(c => c.id !== id);
@@ -221,7 +220,19 @@ function renderCards(){
       <a class="clink" href="viewer.html?u=${encodeURIComponent(card.username)}" target="_blank">View card</a>
       <button class="cdel">Delete</button>
     `;
-    row.querySelector(".cdel").onclick = () => deleteCard(card.id, card.username);
+    const delBtn = row.querySelector(".cdel");
+    let armed = false;
+    let armTimer = null;
+    delBtn.onclick = () => {
+      if (!armed) {
+        armed = true;
+        delBtn.textContent = "Confirm delete?";
+        armTimer = setTimeout(() => { armed = false; delBtn.textContent = "Delete"; }, 4000);
+        return;
+      }
+      clearTimeout(armTimer);
+      deleteCard(card.id, card.username);
+    };
     list.appendChild(row);
   });
 }
