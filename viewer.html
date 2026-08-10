@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Equilibrium League Bingo</title>
+<style>
+  :root{
+    --bg:#14181c; --surface:#1c2228; --surface-hi:#242b32; --border:#2c343c;
+    --text:#e9e6de; --muted:#8d959d; --accent:#b8863f; --accent-soft:#3a3122;
+    --done:#4f9d69; --done-soft:#1c2a20;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",-apple-system,sans-serif;min-height:100vh;}
+  .wrap{max-width:780px;margin:0 auto;padding:32px 20px 80px;text-align:center;}
+  .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:700;}
+  h1{font-family:Georgia,serif;font-size:clamp(26px,4vw,34px);margin:6px 0 18px;}
+  .entry{max-width:360px;margin:0 auto 30px;}
+  .entry input{width:100%;padding:12px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:16px;text-align:center;}
+  .entry button{margin-top:10px;width:100%;padding:11px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-soft);color:var(--accent);font-weight:700;cursor:pointer;font-size:14.5px;}
+  .entry button:hover{background:var(--accent);color:#1c1508;}
+  .sub{color:var(--muted);font-size:13.5px;max-width:50ch;margin:0 auto 20px;line-height:1.5;}
+  .board-head{display:flex;justify-content:space-between;align-items:center;margin:0 0 14px;text-align:left;}
+  .board-head .name{font-weight:800;font-size:17px;}
+  .board-head .progress{font-size:12.5px;color:var(--muted);}
+  .board-head button{background:none;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer;}
+  .board-head .actions{display:flex;gap:8px;}
+  .copyBtn{border-color:var(--accent) !important;color:var(--accent) !important;}
+  .board{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;}
+  .sq{aspect-ratio:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;
+      display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:6px;
+      transition:all .2s;position:relative;overflow:hidden;}
+  .sq.done{border-color:var(--done);background:linear-gradient(var(--done-soft),var(--done-soft)) padding-box, var(--surface);}
+  .sq.done::after{content:"✓";position:absolute;top:4px;right:6px;color:var(--done);font-weight:900;font-size:14px;}
+  .sq img{width:32px;height:32px;object-fit:contain;}
+  .sq .nm{font-size:9.5px;line-height:1.15;font-weight:700;}
+  .sq .rg{font-size:7.5px;color:var(--accent);text-transform:uppercase;letter-spacing:.04em;}
+  .hidden{display:none;}
+  .err{color:#c1594a;font-size:13px;margin-top:8px;}
+  footer{margin-top:34px;color:var(--muted);font-size:12px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Equilibrium League · Twitch Bingo</div>
+  <h1>Get Your Bingo Card</h1>
+
+  <div id="entry" class="entry">
+    <p class="sub">Enter your Twitch username to generate your card. Same username always gets the same card — come back anytime.</p>
+    <input id="uname" placeholder="your_twitch_username" autocomplete="off">
+    <button id="go">Get my card</button>
+    <div class="err hidden" id="err"></div>
+  </div>
+
+  <div id="boardWrap" class="hidden">
+    <div class="board-head">
+      <div>
+        <div class="name" id="boardName"></div>
+        <div class="progress" id="boardProgress"></div>
+      </div>
+      <div class="actions">
+        <button id="copyBtn" class="copyBtn">Copy my link</button>
+        <button id="switchBtn">Different username</button>
+      </div>
+    </div>
+    <div class="board" id="board"></div>
+  </div>
+
+  <footer>Squares cross out live the moment Sleek confirms a drop on stream.</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+const SUPABASE_URL = "https://nmwbwclpwvbcenhxfirw.supabase.co";
+const SUPABASE_KEY = "sb_publishable_VlC6QzuXAYyKrfF-lf8V0Q_Vh8a-k5-";
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const BOARD_SIZE = 25; // 5x5
+
+// Deterministic string hash -> 32-bit seed
+function hashSeed(str){
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return () => {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return (h >>> 0) / 4294967296;
+  };
+}
+
+function seededShuffle(arr, rand){
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(rand() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+let approvedItems = [];
+let currentCard = null; // { username, layout: [item ids] }
+let itemsById = {};
+let channel = null;
+
+async function loadApproved(){
+  const { data, error } = await sb.from("items").select("*").eq("approved", true);
+  if (error) { showErr("Could not load item pool: " + error.message); return; }
+  approvedItems = data;
+  itemsById = Object.fromEntries(data.map(i => [i.id, i]));
+}
+
+function showErr(msg){
+  const e = document.getElementById("err");
+  e.textContent = msg;
+  e.classList.remove("hidden");
+}
+
+async function getOrCreateCard(username){
+  const key = username.trim().toLowerCase();
+  if (!key) { showErr("Enter a username."); return null; }
+
+  const { data: existing, error: selErr } = await sb.from("cards").select("*").eq("username", key).maybeSingle();
+  if (selErr) { showErr("Lookup failed: " + selErr.message); return null; }
+  if (existing) return existing;
+
+  if (approvedItems.length < BOARD_SIZE) {
+    showErr(`Only ${approvedItems.length} approved items so far — need at least ${BOARD_SIZE} to build a card. Check back once more are approved.`);
+    return null;
+  }
+
+  const rand = hashSeed(key);
+  const chosen = seededShuffle(approvedItems, rand).slice(0, BOARD_SIZE);
+  const layout = chosen.map(i => i.id);
+
+  const { data: created, error: insErr } = await sb.from("cards")
+    .insert({ username: key, layout })
+    .select().single();
+  if (insErr) { showErr("Could not save card: " + insErr.message); return null; }
+  return created;
+}
+
+function renderBoard(){
+  document.getElementById("boardName").textContent = currentCard.username;
+  const board = document.getElementById("board");
+  board.innerHTML = "";
+  let doneCount = 0;
+
+  currentCard.layout.forEach(id => {
+    const item = itemsById[id];
+    const sq = document.createElement("div");
+    sq.className = "sq";
+    if (item?.obtained) { sq.classList.add("done"); doneCount++; }
+    sq.innerHTML = item
+      ? `${item.icon ? `<img src="${item.icon}" alt="">` : ""}<div class="nm">${item.name}</div><div class="rg">${item.region}</div>`
+      : `<div class="nm">(item removed)</div>`;
+    board.appendChild(sq);
+  });
+
+  document.getElementById("boardProgress").textContent = `${doneCount} / ${currentCard.layout.length} squares complete`;
+}
+
+function subscribeRealtime(){
+  if (channel) sb.removeChannel(channel);
+  channel = sb.channel("items-viewer")
+    .on("postgres_changes", { event: "UPDATE", schema: "public", table: "items" }, payload => {
+      itemsById[payload.new.id] = payload.new;
+      if (currentCard && currentCard.layout.includes(payload.new.id)) renderBoard();
+    })
+    .subscribe();
+}
+
+async function loadFreshItemsById(){
+  const ids = currentCard.layout;
+  const { data, error } = await sb.from("items").select("*").in("id", ids);
+  if (!error) data.forEach(i => { itemsById[i.id] = i; });
+}
+
+async function showCard(uname){
+  document.getElementById("err").classList.add("hidden");
+  await loadApproved();
+  const card = await getOrCreateCard(uname);
+  if (!card) return false;
+  currentCard = card;
+  await loadFreshItemsById();
+  document.getElementById("entry").classList.add("hidden");
+  document.getElementById("boardWrap").classList.remove("hidden");
+  renderBoard();
+  subscribeRealtime();
+  localStorage.setItem("bingo-last-username", card.username);
+  const url = new URL(location.href);
+  url.searchParams.set("u", card.username);
+  history.replaceState(null, "", url);
+  return true;
+}
+
+document.getElementById("go").onclick = () => showCard(document.getElementById("uname").value);
+
+document.getElementById("switchBtn").onclick = () => {
+  document.getElementById("boardWrap").classList.add("hidden");
+  document.getElementById("entry").classList.remove("hidden");
+  if (channel) { sb.removeChannel(channel); channel = null; }
+  currentCard = null;
+  const url = new URL(location.href);
+  url.searchParams.delete("u");
+  history.replaceState(null, "", url);
+};
+
+document.getElementById("copyBtn").onclick = () => {
+  navigator.clipboard.writeText(location.href).then(() => {
+    const btn = document.getElementById("copyBtn");
+    const old = btn.textContent;
+    btn.textContent = "Copied!";
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  });
+};
+
+document.getElementById("uname").addEventListener("keydown", e => {
+  if (e.key === "Enter") document.getElementById("go").click();
+});
+
+// If a username is in the URL (?u=name), load that card straight away —
+// this is what makes shareable links like viewer.html?u=someviewer work.
+const urlUname = new URL(location.href).searchParams.get("u");
+if (urlUname) {
+  document.getElementById("uname").value = urlUname;
+  showCard(urlUname);
+} else {
+  // otherwise auto-resume last username on this device/browser
+  const last = localStorage.getItem("bingo-last-username");
+  if (last) document.getElementById("uname").value = last;
+}
+</script>
+</body>
+</html>
