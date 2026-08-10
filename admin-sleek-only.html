@@ -45,6 +45,15 @@
   .tbtn.reject.on{background:var(--reject);border-color:var(--reject);color:#210e0a;}
   .tbtn.obtain.on{background:var(--accent);border-color:var(--accent);color:#1c1508;}
   .empty{color:var(--muted);padding:40px;text-align:center;}
+  .hidden{display:none !important;}
+  .crow{display:flex;align-items:center;gap:16px;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:8px;}
+  .crow .cname{font-weight:700;font-size:14.5px;min-width:180px;}
+  .crow .cmeta{color:var(--muted);font-size:12.5px;flex:1;}
+  .crow .cprog{font-size:12.5px;color:var(--text);font-variant-numeric:tabular-nums;min-width:110px;}
+  .crow .clink{color:var(--accent);font-size:12px;text-decoration:none;border:1px solid var(--border);padding:5px 10px;border-radius:6px;}
+  .crow .clink:hover{border-color:var(--accent);}
+  .crow .cdel{border:1px solid var(--reject);background:var(--reject-soft);color:var(--reject);padding:6px 12px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;}
+  .crow .cdel:hover{background:var(--reject);color:#210e0a;}
   .toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--accent);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;}
   .toast.show{opacity:1;}
 </style>
@@ -66,14 +75,21 @@
   <div class="tabs">
     <div class="tab active" data-tab="review">Review pool</div>
     <div class="tab" data-tab="drops">Mark drops</div>
+    <div class="tab" data-tab="cards">Viewer cards</div>
   </div>
 
-  <div class="bar">
+  <div class="bar" id="itemBar">
     <div class="regions" id="regionPills"></div>
     <div class="stats" id="stats"></div>
   </div>
 
+  <div class="bar hidden" id="cardsBar">
+    <input id="cardSearch" type="text" placeholder="Search username…" style="flex:1;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:13.5px;">
+    <div class="stats" id="cardStats"></div>
+  </div>
+
   <div class="grid" id="grid"></div>
+  <div id="cardsList" class="hidden"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -111,6 +127,8 @@ if (sessionStorage.getItem("bingo-admin-ok") === "1") {
 }
 
 let items = [];
+let cards = [];
+let cardSearch = "";
 let activeRegion = "All";
 let activeTab = "review";
 const REGION_ORDER = ["Misthalin","Havenhythe","Karamja","Desert","Wilderness","Anachronia"];
@@ -120,8 +138,18 @@ document.querySelectorAll(".tab").forEach(t => {
     document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
     t.classList.add("active");
     activeTab = t.dataset.tab;
+    document.getElementById("itemBar").classList.toggle("hidden", activeTab === "cards");
+    document.getElementById("cardsBar").classList.toggle("hidden", activeTab !== "cards");
+    document.getElementById("grid").classList.toggle("hidden", activeTab === "cards");
+    document.getElementById("cardsList").classList.toggle("hidden", activeTab !== "cards");
+    if (activeTab === "cards" && cards.length === 0) loadCards();
     render();
   };
+});
+
+document.getElementById("cardSearch").addEventListener("input", e => {
+  cardSearch = e.target.value.trim().toLowerCase();
+  renderCards();
 });
 
 function toast(msg){
@@ -149,6 +177,53 @@ async function loadItems(){
   const { data, error } = await sb.from("items").select("*").order("region").order("name");
   if (error) { toast("Load error: " + error.message); return; }
   items = data;
+}
+
+async function loadCards(){
+  const { data, error } = await sb.from("cards").select("*").order("created_at", { ascending: false });
+  if (error) { toast("Load error: " + error.message); return; }
+  cards = data;
+  renderCards();
+}
+
+async function deleteCard(id, username){
+  if (!confirm(`Delete ${username}'s card? They'll get a brand new random card next time they visit their link.`)) return;
+  const { error } = await sb.from("cards").delete().eq("id", id);
+  if (error) { toast("Delete failed: " + error.message); return; }
+  cards = cards.filter(c => c.id !== id);
+  renderCards();
+  toast(`Deleted ${username}'s card.`);
+}
+
+function renderCards(){
+  const list = document.getElementById("cardsList");
+  const filtered = cardSearch
+    ? cards.filter(c => c.username.toLowerCase().includes(cardSearch))
+    : cards;
+
+  document.getElementById("cardStats").innerHTML = `<span>Total cards <b>${cards.length}</b></span>`;
+
+  if (filtered.length === 0) {
+    list.innerHTML = `<div class="empty">${cards.length === 0 ? "No viewer cards generated yet." : "No cards match that search."}</div>`;
+    return;
+  }
+
+  list.innerHTML = "";
+  filtered.forEach(card => {
+    const obtainedCount = card.layout.filter(id => items.find(i => i.id === id)?.obtained).length;
+    const row = document.createElement("div");
+    row.className = "crow";
+    const created = new Date(card.created_at).toLocaleString();
+    row.innerHTML = `
+      <div class="cname">${card.username}</div>
+      <div class="cmeta">created ${created} · ${card.layout.length} squares</div>
+      <div class="cprog">${obtainedCount} / ${card.layout.length} complete</div>
+      <a class="clink" href="viewer.html?u=${encodeURIComponent(card.username)}" target="_blank">View card</a>
+      <button class="cdel">Delete</button>
+    `;
+    row.querySelector(".cdel").onclick = () => deleteCard(card.id, card.username);
+    list.appendChild(row);
+  });
 }
 
 function renderPills(){
