@@ -12,7 +12,19 @@
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",-apple-system,sans-serif;min-height:100vh;}
-  .wrap{max-width:780px;margin:0 auto;padding:32px 20px 80px;text-align:center;}
+  .bg-swirl{
+    position:fixed; inset:-10%;
+    background-image:url('assets/equilibrium-swirl.png');
+    background-size:160%; background-position:center;
+    opacity:0.42; filter:blur(38px) saturate(1.35);
+    transform:scale(1.15); pointer-events:none; z-index:0;
+  }
+  .bg-fade{
+    position:fixed; inset:0;
+    background:radial-gradient(ellipse 1000px 600px at 50% 0%, rgba(16,20,15,.35) 0%, rgba(16,20,15,.78) 60%, #10140f 92%);
+    pointer-events:none; z-index:0;
+  }
+  .wrap{max-width:780px;margin:0 auto;padding:32px 20px 80px;text-align:center;position:relative;z-index:1;}
   .eyebrow{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:700;}
   h1{font-family:Georgia,serif;font-size:clamp(26px,4vw,34px);margin:6px 0 18px;}
   .entry{max-width:360px;margin:0 auto 30px;}
@@ -38,9 +50,22 @@
   .hidden{display:none;}
   .err{color:#c1594a;font-size:13px;margin-top:8px;}
   footer{margin-top:34px;color:var(--muted);font-size:12px;}
+
+  @keyframes eq-sq-pulse{0%{box-shadow:0 0 0 0 rgba(79,157,105,.6);}70%{box-shadow:0 0 0 14px rgba(79,157,105,0);}100%{box-shadow:0 0 0 0 rgba(79,157,105,0);}}
+  @keyframes eq-toast-in{0%{transform:translateY(12px) translateX(-50%);opacity:0;}100%{transform:translateY(0) translateX(-50%);opacity:1;}}
+  @keyframes eq-confetti-fall{0%{transform:translateY(-20px) rotate(0deg);opacity:1;}100%{transform:translateY(420px) rotate(360deg);opacity:0;}}
+  #toast{
+    display:none; position:fixed; left:50%; bottom:28px; transform:translateX(-50%);
+    background:var(--surface); border:1px solid var(--done); color:var(--text);
+    padding:12px 20px; border-radius:10px; font-size:13.5px; font-weight:600;
+    box-shadow:0 8px 24px rgba(0,0,0,.4); z-index:20; white-space:nowrap;
+  }
+  #confetti-layer{position:fixed; inset:0; pointer-events:none; overflow:hidden; z-index:19;}
 </style>
 </head>
 <body>
+<div class="bg-swirl"></div>
+<div class="bg-fade"></div>
 <div class="wrap">
   <div class="eyebrow">Equilibrium League · Twitch Bingo</div>
   <h1>Get Your Bingo Card</h1>
@@ -68,6 +93,8 @@
 
   <footer>Squares cross out live the moment Sleek confirms a drop on stream.</footer>
 </div>
+<div id="confetti-layer"></div>
+<div id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
@@ -153,6 +180,7 @@ function renderBoard(){
     const item = itemsById[id];
     const sq = document.createElement("div");
     sq.className = "sq";
+    sq.dataset.itemId = id;
     if (item?.obtained) { sq.classList.add("done"); doneCount++; }
     sq.innerHTML = item
       ? `${item.icon ? `<img src="${item.icon}" alt="">` : ""}<div class="nm">${item.name}</div><div class="rg">${item.region}</div>`
@@ -163,12 +191,73 @@ function renderBoard(){
   document.getElementById("boardProgress").textContent = `${doneCount} / ${currentCard.layout.length} squares complete`;
 }
 
+function celebrateSquare(squareEl, itemName, isLastSquare) {
+  if (!squareEl) return;
+  squareEl.style.animation = 'eq-sq-pulse 1.5s ease';
+  setTimeout(() => squareEl.style.animation = '', 1500);
+  showToast(isLastSquare ? 'Board complete! Every square confirmed on stream.' : `${itemName} confirmed on stream!`);
+  if (isLastSquare) fireConfetti();
+}
+
+function showToast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.animation = 'eq-toast-in .3s ease';
+  clearTimeout(window._toastTimer);
+  window._toastTimer = setTimeout(() => el.style.display = 'none', 3000);
+}
+
+function fireConfetti() {
+  const colors = ['#d4a856', '#4f9d69', '#f3ead8', '#7ec98f'];
+  const container = document.getElementById('confetti-layer');
+  container.innerHTML = '';
+  for (let i = 0; i < 28; i++) {
+    const p = document.createElement('div');
+    const size = 6 + Math.round(Math.random() * 6);
+    p.style.cssText = `position:absolute;top:-20px;left:${Math.random()*100}%;width:${size}px;height:${size}px;background:${colors[i%colors.length]};border-radius:${Math.random()>0.5?'50%':'2px'};animation:eq-confetti-fall ${1.8+Math.random()*1.2}s ease-in ${Math.random()*0.6}s forwards;`;
+    container.appendChild(p);
+  }
+  setTimeout(() => container.innerHTML = '', 3200);
+}
+
+function catchUpDrops(username, layout, itemsById) {
+  const seenKey = `bingo-seen-${username}`;
+  const seen = new Set(JSON.parse(localStorage.getItem(seenKey) || '[]'));
+  const currentlyObtained = layout.filter(id => itemsById[id]?.obtained);
+  const newDrops = currentlyObtained.filter(id => !seen.has(id));
+  localStorage.setItem(seenKey, JSON.stringify(currentlyObtained));
+  if (newDrops.length === 0) return;
+
+  let i = 0;
+  const playNext = () => {
+    if (i >= newDrops.length) return;
+    const id = newDrops[i];
+    const isLast = layout.every(lid => itemsById[lid]?.obtained);
+    celebrateSquare(document.querySelector(`[data-item-id="${id}"]`), itemsById[id]?.name, isLast && i === newDrops.length - 1);
+    i++;
+    setTimeout(playNext, 1900);
+  };
+  setTimeout(playNext, 500);
+}
+
 function subscribeRealtime(){
   if (channel) sb.removeChannel(channel);
   channel = sb.channel("items-viewer")
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "items" }, payload => {
+      const wasObtained = itemsById[payload.new.id]?.obtained;
       itemsById[payload.new.id] = payload.new;
-      if (currentCard && currentCard.layout.includes(payload.new.id)) renderBoard();
+      if (currentCard && currentCard.layout.includes(payload.new.id)) {
+        renderBoard();
+        if (!wasObtained && payload.new.obtained) {
+          const seenKey = `bingo-seen-${currentCard.username}`;
+          const seen = new Set(JSON.parse(localStorage.getItem(seenKey) || '[]'));
+          seen.add(payload.new.id);
+          localStorage.setItem(seenKey, JSON.stringify([...seen]));
+          const isLast = currentCard.layout.every(lid => itemsById[lid]?.obtained);
+          celebrateSquare(document.querySelector(`[data-item-id="${payload.new.id}"]`), payload.new.name, isLast);
+        }
+      }
     })
     .subscribe();
 }
@@ -190,6 +279,7 @@ async function showCard(uname){
   document.getElementById("boardWrap").classList.remove("hidden");
   renderBoard();
   subscribeRealtime();
+  catchUpDrops(currentCard.username, currentCard.layout, itemsById);
   localStorage.setItem("bingo-last-username", card.username);
   const url = new URL(location.href);
   url.searchParams.set("u", card.username);

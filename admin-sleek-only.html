@@ -12,7 +12,20 @@
   }
   *{box-sizing:border-box;}
   html,body{margin:0;padding:0;background:var(--bg);color:var(--text);font-family:"Segoe UI",-apple-system,sans-serif;}
-  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px;}
+  .bg-swirl{
+    position:fixed; inset:-10%;
+    background-image:url('assets/equilibrium-swirl.png');
+    background-size:160%; background-position:center;
+    opacity:0.32; filter:blur(38px) saturate(1.35);
+    transform:scale(1.15); pointer-events:none; z-index:0;
+  }
+  .bg-fade{
+    position:fixed; inset:0;
+    background:radial-gradient(ellipse 1000px 600px at 50% 0%, rgba(16,20,15,.35) 0%, rgba(16,20,15,.78) 60%, #10140f 92%);
+    pointer-events:none; z-index:0;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 80px;position:relative;z-index:1;}
+  .gate{position:relative;z-index:1;}
   h1{font-family:Georgia,serif;font-size:28px;margin:6px 0 4px;}
   .sub{color:var(--muted);font-size:13.5px;max-width:70ch;line-height:1.5;}
   .gate{max-width:360px;margin:120px auto;text-align:center;}
@@ -69,6 +82,8 @@
 </style>
 </head>
 <body>
+<div class="bg-swirl"></div>
+<div class="bg-fade"></div>
 
 <div id="gate" class="gate">
   <h1>Admin access</h1>
