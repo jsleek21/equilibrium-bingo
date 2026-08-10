@@ -57,6 +57,15 @@
   .crow .cdel:hover{background:var(--reject);color:#210e0a;}
   .toast{position:fixed;bottom:20px;right:20px;background:var(--surface);border:1px solid var(--accent);color:var(--text);padding:10px 16px;border-radius:8px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none;}
   .toast.show{opacity:1;}
+  .combos{color:var(--accent) !important;font-weight:700;}
+  .cedit{border:1px solid var(--border);background:var(--surface-hi);color:var(--muted);padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700;}
+  .cedit:hover{border-color:var(--accent);color:var(--text);}
+  .squares{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:0 0 14px;padding:14px;background:var(--surface-hi);border:1px solid var(--border);border-radius:10px;}
+  .sqedit{display:flex;flex-direction:column;align-items:center;gap:4px;text-align:center;}
+  .sqedit .sthumb{width:28px;height:28px;border-radius:6px;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden;}
+  .sqedit .sthumb img{max-width:100%;max-height:100%;}
+  .sqedit select{width:100%;font-size:10px;padding:3px 2px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--text);}
+  .sqedit select:focus{border-color:var(--accent);}
 </style>
 </head>
 <body>
@@ -132,7 +141,27 @@ let cards = [];
 let cardSearch = "";
 let activeRegion = "All";
 let activeTab = "review";
+let expandedCardId = null;
 const REGION_ORDER = ["Misthalin","Havenhythe","Karamja","Desert","Wilderness","Anachronia"];
+const BOARD_SIZE = 25; // 5x5, must match viewer.html
+
+// Number of distinct boards possible = permutations of BOARD_SIZE items drawn
+// from the approved pool (order matters — a board is items assigned to 25
+// specific grid positions). P(n, k) = n! / (n-k)!, computed with BigInt since
+// this blows past Number.MAX_SAFE_INTEGER almost immediately.
+function permutations(n, k){
+  if (n < k) return 0n;
+  let result = 1n;
+  for (let i = 0n; i < BigInt(k); i++) result *= (BigInt(n) - i);
+  return result;
+}
+
+function formatBig(n){
+  const s = n.toString();
+  if (s.length <= 15) return s.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  const mantissa = (s[0] + "." + s.slice(1, 4)).replace(/\.?0+$/, "");
+  return `${mantissa} × 10^${s.length - 1}`;
+}
 
 document.querySelectorAll(".tab").forEach(t => {
   t.onclick = () => {
@@ -219,8 +248,13 @@ function renderCards(){
       <div class="cmeta">created ${created} · ${card.layout.length} squares</div>
       <div class="cprog">${obtainedCount} / ${card.layout.length} complete</div>
       <a class="clink" href="viewer.html?u=${encodeURIComponent(card.username)}" target="_blank">View card</a>
+      <button class="cedit">${expandedCardId === card.id ? "Hide squares" : "Edit squares"}</button>
       <button class="cdel">Delete</button>
     `;
+    row.querySelector(".cedit").onclick = () => {
+      expandedCardId = expandedCardId === card.id ? null : card.id;
+      renderCards();
+    };
     const delBtn = row.querySelector(".cdel");
     let armed = false;
     let armTimer = null;
@@ -235,7 +269,68 @@ function renderCards(){
       deleteCard(card.id, card.username);
     };
     list.appendChild(row);
+
+    if (expandedCardId === card.id) {
+      list.appendChild(renderSquareEditor(card));
+    }
   });
+}
+
+function renderSquareEditor(card){
+  const approvedSorted = items.filter(i => i.approved).sort((a,b) => a.name.localeCompare(b.name));
+  const wrap = document.createElement("div");
+  wrap.className = "squares";
+
+  card.layout.forEach((itemId, idx) => {
+    const current = items.find(i => i.id === itemId);
+    const cell = document.createElement("div");
+    cell.className = "sqedit";
+    const thumb = document.createElement("div");
+    thumb.className = "sthumb";
+    thumb.innerHTML = current?.icon ? `<img src="${current.icon}" alt="">` : "";
+    cell.appendChild(thumb);
+
+    const select = document.createElement("select");
+    const randomOpt = document.createElement("option");
+    randomOpt.value = "__random__";
+    randomOpt.textContent = "🎲 Random approved item";
+    select.appendChild(randomOpt);
+    approvedSorted.forEach(i => {
+      const opt = document.createElement("option");
+      opt.value = i.id;
+      opt.textContent = `${i.name} (${i.region})`;
+      if (i.id === itemId) opt.selected = true;
+      select.appendChild(opt);
+    });
+    if (!current) {
+      const missingOpt = document.createElement("option");
+      missingOpt.value = itemId;
+      missingOpt.textContent = "(removed item — pick a replacement)";
+      missingOpt.selected = true;
+      select.insertBefore(missingOpt, select.firstChild);
+    }
+
+    select.onchange = async () => {
+      let newId = select.value;
+      if (newId === "__random__") {
+        const candidates = approvedSorted.filter(i => !card.layout.includes(i.id));
+        if (candidates.length === 0) { toast("No other approved items left to swap in."); renderCards(); return; }
+        newId = candidates[Math.floor(Math.random() * candidates.length)].id;
+      }
+      const newLayout = [...card.layout];
+      newLayout[idx] = newId;
+      const { data, error } = await sb.from("cards").update({ layout: newLayout }).eq("id", card.id).select().single();
+      if (error) { toast("Update failed: " + error.message); return; }
+      const ci = cards.findIndex(c => c.id === card.id);
+      if (ci > -1) cards[ci] = data;
+      toast("Square updated.");
+      renderCards();
+    };
+    cell.appendChild(select);
+    wrap.appendChild(cell);
+  });
+
+  return wrap;
 }
 
 function renderPills(){
@@ -255,8 +350,11 @@ function renderStats(){
   const approved = items.filter(i=>i.approved).length;
   const rejected = items.filter(i=>i.rejected).length;
   const obtained = items.filter(i=>i.obtained).length;
+  const combos = approved >= BOARD_SIZE
+    ? formatBig(permutations(approved, BOARD_SIZE))
+    : `need ${BOARD_SIZE - approved} more`;
   document.getElementById("stats").innerHTML =
-    `<span>Total <b>${items.length}</b></span><span>Approved <b>${approved}</b></span><span>Rejected <b>${rejected}</b></span><span>Obtained <b>${obtained}</b></span>`;
+    `<span class="combos">Possible boards <b>${combos}</b></span><span>Total <b>${items.length}</b></span><span>Approved <b>${approved}</b></span><span>Rejected <b>${rejected}</b></span><span>Obtained <b>${obtained}</b></span>`;
 }
 
 async function updateItem(id, patch){
