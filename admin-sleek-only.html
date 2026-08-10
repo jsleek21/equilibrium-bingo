@@ -31,6 +31,7 @@
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px;}
   .card[data-approved="true"]{border-color:var(--approve);}
+  .card[data-rejected="true"]{border-color:var(--reject);opacity:.55;}
   .card[data-obtained="true"]{border-color:var(--accent);background:linear-gradient(var(--accent-soft),var(--accent-soft)) padding-box, var(--surface);}
   .card-top{display:flex;gap:12px;align-items:center;}
   .thumb{width:56px;height:56px;flex:none;border-radius:8px;background:var(--surface-hi);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;overflow:hidden;}
@@ -252,9 +253,10 @@ function renderPills(){
 
 function renderStats(){
   const approved = items.filter(i=>i.approved).length;
+  const rejected = items.filter(i=>i.rejected).length;
   const obtained = items.filter(i=>i.obtained).length;
   document.getElementById("stats").innerHTML =
-    `<span>Total <b>${items.length}</b></span><span>Approved <b>${approved}</b></span><span>Obtained <b>${obtained}</b></span>`;
+    `<span>Total <b>${items.length}</b></span><span>Approved <b>${approved}</b></span><span>Rejected <b>${rejected}</b></span><span>Obtained <b>${obtained}</b></span>`;
 }
 
 async function updateItem(id, patch){
@@ -284,6 +286,7 @@ function render(){
     card.className = "card";
     card.dataset.approved = !!item.approved;
     card.dataset.obtained = !!item.obtained;
+    card.dataset.rejected = !!item.rejected;
     const thumb = item.icon
       ? `<img src="${item.icon}" alt="">`
       : `<div class="fallback">no img</div>`;
@@ -298,7 +301,7 @@ function render(){
       </div>
       <div class="row" data-role="review-row" style="${activeTab==='drops' ? 'display:none;' : ''}">
         <button class="tbtn approve ${item.approved ? 'on':''}">Approve</button>
-        <button class="tbtn reject ${item.approved===false && item.rejected ? 'on':''}">Reject</button>
+        <button class="tbtn reject ${item.rejected ? 'on':''}">Reject</button>
       </div>
       <div class="row" data-role="drop-row" style="${activeTab==='review' ? 'display:none;' : ''}">
         <button class="tbtn obtain ${item.obtained ? 'on':''}">${item.obtained ? 'Obtained ✓' : 'Mark obtained'}</button>
@@ -307,8 +310,14 @@ function render(){
     const approveBtn = card.querySelector(".approve");
     const rejectBtn = card.querySelector(".reject");
     const obtainBtn = card.querySelector(".obtain");
-    if (approveBtn) approveBtn.onclick = () => updateItem(item.id, { approved: !item.approved });
-    if (rejectBtn) rejectBtn.onclick = () => updateItem(item.id, { approved: false });
+    if (approveBtn) approveBtn.onclick = () => updateItem(item.id, {
+      approved: !item.approved,
+      rejected: false
+    });
+    if (rejectBtn) rejectBtn.onclick = () => updateItem(item.id, {
+      rejected: !item.rejected,
+      approved: false
+    });
     if (obtainBtn) obtainBtn.onclick = () => updateItem(item.id, {
       obtained: !item.obtained,
       obtained_at: !item.obtained ? new Date().toISOString() : null
