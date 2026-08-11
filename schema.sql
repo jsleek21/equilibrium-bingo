@@ -49,5 +49,7 @@ create policy "public write cards" on cards
 create policy "public update cards" on cards
   for update using (true);
 
--- Enable realtime so viewer pages get live updates when you mark a drop
+-- Enable realtime so viewer pages get live updates when you mark a drop,
+-- and so the admin tool's Drop impact / Viewer cards tabs update live too.
 alter publication supabase_realtime add table items;
+alter publication supabase_realtime add table cards;

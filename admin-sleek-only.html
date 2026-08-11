@@ -101,6 +101,7 @@
     <div class="tab active" data-tab="review">Review pool</div>
     <div class="tab" data-tab="drops">Mark drops</div>
     <div class="tab" data-tab="cards">Viewer cards</div>
+    <div class="tab" data-tab="impact">Drop impact</div>
   </div>
 
   <div class="bar" id="itemBar">
@@ -113,8 +114,13 @@
     <div class="stats" id="cardStats"></div>
   </div>
 
+  <div class="bar hidden" id="impactBar">
+    <div class="stats" id="impactStats"></div>
+  </div>
+
   <div class="grid" id="grid"></div>
   <div id="cardsList" class="hidden"></div>
+  <div id="impactList" class="hidden"></div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -183,11 +189,13 @@ document.querySelectorAll(".tab").forEach(t => {
     document.querySelectorAll(".tab").forEach(x => x.classList.remove("active"));
     t.classList.add("active");
     activeTab = t.dataset.tab;
-    document.getElementById("itemBar").classList.toggle("hidden", activeTab === "cards");
+    document.getElementById("itemBar").classList.toggle("hidden", activeTab === "cards" || activeTab === "impact");
     document.getElementById("cardsBar").classList.toggle("hidden", activeTab !== "cards");
-    document.getElementById("grid").classList.toggle("hidden", activeTab === "cards");
+    document.getElementById("impactBar").classList.toggle("hidden", activeTab !== "impact");
+    document.getElementById("grid").classList.toggle("hidden", activeTab === "cards" || activeTab === "impact");
     document.getElementById("cardsList").classList.toggle("hidden", activeTab !== "cards");
-    if (activeTab === "cards" && cards.length === 0) loadCards();
+    document.getElementById("impactList").classList.toggle("hidden", activeTab !== "impact");
+    if ((activeTab === "cards" || activeTab === "impact") && cards.length === 0) loadCards();
     render();
   };
 });
@@ -206,6 +214,7 @@ function toast(msg){
 
 async function init(){
   await loadItems();
+  await loadCards();
   sb.channel("items-admin")
     .on("postgres_changes", { event: "*", schema: "public", table: "items" }, payload => {
       const idx = items.findIndex(i => i.id === payload.new?.id || i.id === payload.old?.id);
@@ -213,6 +222,16 @@ async function init(){
       else if (idx > -1) items[idx] = payload.new;
       else items.push(payload.new);
       render();
+    })
+    .subscribe();
+  sb.channel("cards-admin")
+    .on("postgres_changes", { event: "*", schema: "public", table: "cards" }, payload => {
+      const idx = cards.findIndex(c => c.id === payload.new?.id || c.id === payload.old?.id);
+      if (payload.eventType === "DELETE") { if (idx>-1) cards.splice(idx,1); }
+      else if (idx > -1) cards[idx] = payload.new;
+      else cards.unshift(payload.new);
+      renderCards();
+      renderImpact();
     })
     .subscribe();
   render();
@@ -229,6 +248,7 @@ async function loadCards(){
   if (error) { toast("Load error: " + error.message); return; }
   cards = data;
   renderCards();
+  renderImpact();
 }
 
 async function deleteCard(id, username){
@@ -380,9 +400,57 @@ async function updateItem(id, patch){
   render();
 }
 
+function renderImpact(){
+  const list = document.getElementById("impactList");
+  const obtainedItems = items.filter(i => i.obtained).sort((a,b) => {
+    const at = a.obtained_at || "", bt = b.obtained_at || "";
+    return bt.localeCompare(at); // most recently obtained first
+  });
+
+  const totalAffected = new Set();
+  obtainedItems.forEach(item => {
+    cards.forEach(c => { if (c.layout.includes(item.id)) totalAffected.add(c.username); });
+  });
+  document.getElementById("impactStats").innerHTML =
+    `<span>Drops obtained <b>${obtainedItems.length}</b></span><span>Viewers affected <b>${totalAffected.size}</b></span><span>Total cards <b>${cards.length}</b></span>`;
+
+  if (obtainedItems.length === 0) {
+    list.innerHTML = `<div class="empty">No drops marked obtained yet.</div>`;
+    return;
+  }
+
+  list.innerHTML = "";
+  obtainedItems.forEach(item => {
+    const affected = cards.filter(c => c.layout.includes(item.id)).map(c => c.username).sort((a,b)=>a.localeCompare(b));
+    const box = document.createElement("div");
+    box.className = "crow";
+    box.style.flexDirection = "column";
+    box.style.alignItems = "flex-start";
+    box.style.gap = "8px";
+    const when = item.obtained_at ? new Date(item.obtained_at).toLocaleString() : "";
+    const thumb = item.icon ? `<img src="${item.icon}" alt="" style="width:22px;height:22px;vertical-align:middle;border-radius:4px;margin-right:8px;">` : "";
+    box.innerHTML = `
+      <div style="display:flex;align-items:center;gap:10px;width:100%;">
+        ${thumb}
+        <div class="cname" style="min-width:auto;">${item.name}</div>
+        <div class="item-region">${item.region}</div>
+        <div class="cmeta" style="flex:1;text-align:right;">${when ? "obtained " + when : ""}</div>
+        <div class="cprog" style="min-width:auto;">${affected.length} affected</div>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;width:100%;">
+        ${affected.length
+          ? affected.map(u => `<span class="pill" style="cursor:default;">${u}</span>`).join("")
+          : `<span class="cmeta">No current cards have this square.</span>`}
+      </div>
+    `;
+    list.appendChild(box);
+  });
+}
+
 function render(){
   renderPills();
   renderStats();
+  if (activeTab === "impact") renderImpact();
   const grid = document.getElementById("grid");
   grid.innerHTML = "";
 
