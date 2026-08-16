@@ -51,6 +51,15 @@
   .err{color:#c1594a;font-size:13px;margin-top:8px;}
   footer{margin-top:34px;color:var(--muted);font-size:12px;}
 
+  .recent{margin-top:22px;text-align:left;}
+  .recent-head{font-size:11.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:8px;}
+  .recent-list{display:flex;flex-direction:column;gap:6px;}
+  .recent-row{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:7px 10px;}
+  .recent-row img{width:24px;height:24px;object-fit:contain;flex:none;}
+  .recent-row .rname{font-size:13px;font-weight:700;flex:1;}
+  .recent-row .rregion{font-size:10px;color:var(--accent);text-transform:uppercase;letter-spacing:.04em;}
+  .recent-row .rwhen{font-size:11px;color:var(--muted);white-space:nowrap;}
+
   @keyframes eq-sq-pulse{0%{box-shadow:0 0 0 0 rgba(79,157,105,.6);}70%{box-shadow:0 0 0 14px rgba(79,157,105,0);}100%{box-shadow:0 0 0 0 rgba(79,157,105,0);}}
   @keyframes eq-toast-in{0%{transform:translateY(12px) translateX(-50%);opacity:0;}100%{transform:translateY(0) translateX(-50%);opacity:1;}}
   @keyframes eq-confetti-fall{0%{transform:translateY(-20px) rotate(0deg);opacity:1;}100%{transform:translateY(420px) rotate(360deg);opacity:0;}}
@@ -89,6 +98,11 @@
       </div>
     </div>
     <div class="board" id="board"></div>
+
+    <div id="recentWrap" class="recent hidden">
+      <div class="recent-head">Last drops obtained</div>
+      <div id="recentList" class="recent-list"></div>
+    </div>
   </div>
 
   <footer>Squares cross out live the moment Sleek confirms a drop on stream.</footer>
@@ -241,12 +255,57 @@ function catchUpDrops(username, layout, itemsById) {
   setTimeout(playNext, 500);
 }
 
+let recentDrops = [];
+
+function timeAgo(iso){
+  const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (diff < 60) return "just now";
+  if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+  return `${Math.floor(diff/86400)}d ago`;
+}
+
+function renderRecent(){
+  const wrap = document.getElementById("recentWrap");
+  const list = document.getElementById("recentList");
+  if (recentDrops.length === 0) { wrap.classList.add("hidden"); return; }
+  wrap.classList.remove("hidden");
+  list.innerHTML = recentDrops.map(item => `
+    <div class="recent-row">
+      ${item.icon ? `<img src="${item.icon}" alt="">` : ""}
+      <div class="rname">${item.name}</div>
+      <div class="rregion">${item.region}</div>
+      <div class="rwhen">${item.obtained_at ? timeAgo(item.obtained_at) : ""}</div>
+    </div>
+  `).join("");
+}
+
+async function loadRecentDrops(){
+  const { data, error } = await sb.from("items").select("*")
+    .eq("obtained", true).order("obtained_at", { ascending: false }).limit(5);
+  if (error) return;
+  recentDrops = data;
+  renderRecent();
+}
+
 function subscribeRealtime(){
   if (channel) sb.removeChannel(channel);
   channel = sb.channel("items-viewer")
     .on("postgres_changes", { event: "UPDATE", schema: "public", table: "items" }, payload => {
       const wasObtained = itemsById[payload.new.id]?.obtained;
       itemsById[payload.new.id] = payload.new;
+
+      if (!wasObtained && payload.new.obtained) {
+        recentDrops = [payload.new, ...recentDrops.filter(i => i.id !== payload.new.id)].slice(0, 5);
+        renderRecent();
+      } else if (wasObtained && !payload.new.obtained) {
+        recentDrops = recentDrops.filter(i => i.id !== payload.new.id);
+        renderRecent();
+      } else if (recentDrops.some(i => i.id === payload.new.id)) {
+        recentDrops = recentDrops.map(i => i.id === payload.new.id ? payload.new : i);
+        renderRecent();
+      }
+
       if (currentCard && currentCard.layout.includes(payload.new.id)) {
         renderBoard();
         if (!wasObtained && payload.new.obtained) {
@@ -279,6 +338,7 @@ async function showCard(uname){
   document.getElementById("boardWrap").classList.remove("hidden");
   renderBoard();
   subscribeRealtime();
+  loadRecentDrops();
   catchUpDrops(currentCard.username, currentCard.layout, itemsById);
   localStorage.setItem("bingo-last-username", card.username);
   const url = new URL(location.href);
@@ -294,6 +354,8 @@ document.getElementById("switchBtn").onclick = () => {
   document.getElementById("entry").classList.remove("hidden");
   if (channel) { sb.removeChannel(channel); channel = null; }
   currentCard = null;
+  recentDrops = [];
+  document.getElementById("recentWrap").classList.add("hidden");
   const url = new URL(location.href);
   url.searchParams.delete("u");
   history.replaceState(null, "", url);

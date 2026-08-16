@@ -439,7 +439,7 @@ function renderImpact(){
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;width:100%;">
         ${affected.length
-          ? affected.map(u => `<span class="pill" style="cursor:default;">${u}</span>`).join("")
+          ? affected.map(u => `<a class="pill" style="text-decoration:none;" href="viewer.html?u=${encodeURIComponent(u)}" target="_blank">${u}</a>`).join("")
           : `<span class="cmeta">No current cards have this square.</span>`}
       </div>
     `;
