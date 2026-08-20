@@ -35,6 +35,7 @@
   .board-head{display:flex;justify-content:space-between;align-items:center;margin:0 0 14px;text-align:left;}
   .board-head .name{font-weight:800;font-size:17px;}
   .board-head .progress{font-size:12.5px;color:var(--muted);}
+  .board-head .bingos{font-size:12.5px;color:var(--done);font-weight:800;margin-top:2px;}
   .board-head button{background:none;border:1px solid var(--border);color:var(--muted);padding:6px 12px;border-radius:7px;font-size:12px;cursor:pointer;}
   .board-head .actions{display:flex;gap:8px;}
   .copyBtn{border-color:var(--accent) !important;color:var(--accent) !important;}
@@ -91,6 +92,7 @@
       <div>
         <div class="name" id="boardName"></div>
         <div class="progress" id="boardProgress"></div>
+        <div class="bingos hidden" id="boardBingos"></div>
       </div>
       <div class="actions">
         <button id="copyBtn" class="copyBtn">Copy my link</button>
@@ -117,6 +119,16 @@ const SUPABASE_KEY = "sb_publishable_VlC6QzuXAYyKrfF-lf8V0Q_Vh8a-k5-";
 const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const BOARD_SIZE = 25; // 5x5
+
+// Winning lines on a 5x5 board: 5 rows, 5 cols, 2 diagonals.
+const BINGO_LINES = [
+  [0,1,2,3,4],[5,6,7,8,9],[10,11,12,13,14],[15,16,17,18,19],[20,21,22,23,24],
+  [0,5,10,15,20],[1,6,11,16,21],[2,7,12,17,22],[3,8,13,18,23],[4,9,14,19,24],
+  [0,6,12,18,24],[4,8,12,16,20]
+];
+function countBingos(layout, itemsById){
+  return BINGO_LINES.filter(line => line.every(idx => itemsById[layout[idx]]?.obtained)).length;
+}
 
 // Deterministic string hash -> 32-bit seed
 function hashSeed(str){
@@ -203,6 +215,15 @@ function renderBoard(){
   });
 
   document.getElementById("boardProgress").textContent = `${doneCount} / ${currentCard.layout.length} squares complete`;
+
+  const bingos = countBingos(currentCard.layout, itemsById);
+  const bingoEl = document.getElementById("boardBingos");
+  if (bingos > 0) {
+    bingoEl.textContent = `🟩 ${bingos} bingo${bingos === 1 ? "" : "s"}!`;
+    bingoEl.classList.remove("hidden");
+  } else {
+    bingoEl.classList.add("hidden");
+  }
 }
 
 function celebrateSquare(squareEl, itemName, isLastSquare) {
